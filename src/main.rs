@@ -1,29 +1,36 @@
 use tokio::prelude::*;
 use tokio::io::AsyncBufReadExt;
+use std::sync::Arc;
+
+use tokio::sync::Mutex;
 
 #[tokio::main]
 async fn main() -> Result<(), std::io::Error> {
     let mut args = std::env::args();
     let _me = args.next();
     let mut tasks = vec![];
+    let count = Arc::new(Mutex::new(0u32));
 
     for filename in args {
-        tasks.push(tokio::spawn(async {
+        let count = count.clone();
+        tasks.push(tokio::spawn(async move {
             let file = tokio::fs::File::open(filename).await?;
             let file = io::BufReader::new(file);
             let mut lines = file.lines();
-            let mut count = 0u32;
+            let mut local_count = 0u32;
             while let Some(_) = lines.next_line().await? {
-                count += 1;
+                local_count += 1;
             }
-            Ok(count) as Result<u32, std::io::Error>
+            let mut count = count.lock().await;
+            *count += local_count;
+            Ok(()) as Result<(), std::io::Error>
         }));
     }
 
-    let mut count = 0u32;
     for task in tasks {
-        count += task.await??;
+        task.await??;
     }
+    let count = count.lock().await;
     println!("Total lines: {}", count);
     Ok(())
 }
